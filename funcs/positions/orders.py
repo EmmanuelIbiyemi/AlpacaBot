@@ -124,5 +124,3 @@ def placeSellorderStop(symbol: str, qty: str, stop_price: str):
             "reason":str(error)
         }
 
-
-placeBuyorderLimit_("AAPL", "10", "317.50")
