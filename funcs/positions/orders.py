@@ -27,7 +27,10 @@ def placeBuyorderLimit_(symbol: str, qty: str, limit_price: str):
 
         response = requests.post(url, json=payload, headers=headers)
 
-        print(response.text)
+        return {
+            "status":"success",
+            "msg":"order placed successfully"
+        }
 
     except Exception as error:
         return {
@@ -56,7 +59,10 @@ def placeSellOrderLimit_(symbol: str, qty: str, limit_price: str):
 
         response = requests.post(url, json=payload, headers=headers)
 
-        print(response.text)
+        return {
+            "status":"success",
+            "msg":"order placed successfully"
+        }
 
     except Exception as error:
         return {
@@ -65,7 +71,7 @@ def placeSellOrderLimit_(symbol: str, qty: str, limit_price: str):
         }
 
 
-def placeBuyorder_Stop(symbol: str, qty: str, stop_price: str):
+def placeBuyorder_Stop(symbol: str, qty: int, stop_price: str):
     try:
         url = ENDPOINT
 
@@ -86,7 +92,10 @@ def placeBuyorder_Stop(symbol: str, qty: str, stop_price: str):
 
         response = requests.post(url, json=payload, headers=headers)
 
-        print(response.text)
+        return {
+            "status":"success",
+            "msg":"order placed successfully"
+        }
 
     except Exception as error:
         return {
@@ -116,7 +125,10 @@ def placeSellorderStop(symbol: str, qty: str, stop_price: str):
 
         response = requests.post(url, json=payload, headers=headers)
 
-        print(response.text)
+        return {
+            "status":"success",
+            "msg":"order placed successfully"
+        }
 
     except Exception as error:
         return {
