@@ -4,7 +4,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from urls.urls import ENDPOINT, APIKEY, APISECRET
-print("Endpoint: ", ENDPOINT)
+
 import requests
 
 def placeBuyorderLimit_(symbol: str, qty: str, limit_price: str):

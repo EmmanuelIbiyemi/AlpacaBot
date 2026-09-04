@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "alpaca-options-desk": {
+      "command": "python",
+      "args": ["/absolute/path/to/alpaca_options_desk.py"],
+      "env": {
+        "ALPACA_API_KEY_ID": "API_KEY",
+        "ALPACA_SECRET_KEY": "API_SECRET",
+        "ALPACA_PAPER": "true"
+      }
+    }
+  }
+}
