@@ -378,7 +378,30 @@ class DeepSeekOptionsTrader:
             "execution": execution_result
         }
 
+DEFAULT_WATCHLIST = [
+    "SPY",   # S&P 500 ETF (Most liquid options market)
+    "QQQ",   # Nasdaq 100 ETF (Tech heavy volatility)
+    "TSLA",  # Tesla (High implied volatility)
+    "NVDA",  # Nvidia (High volume AI leader)
+    "AAPL",  # Apple (Mega-cap tech)
+    "AMD",   # Advanced Micro Devices (High beta semi)
+    "AMZN",  # Amazon (E-commerce / AWS)
+    "META",  # Meta Platforms (Social media / AI)
+    "MSFT",  # Microsoft (Enterprise / Cloud)
+    "GOOGL"  # Alphabet (Search / AI)
+]
+
 if __name__ == "__main__":
-    ticker = sys.argv[1] if len(sys.argv) > 1 else "SPY"
     trader = DeepSeekOptionsTrader()
-    trader.run_cycle(symbol=ticker)
+    if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
+        targets = [sys.argv[1].upper()]
+    else:
+        targets = DEFAULT_WATCHLIST
+
+    print(f"🚀 Launching DeepSeek Options Scanner on {len(targets)} stock(s): {', '.join(targets)}\n")
+    for t in targets:
+        try:
+            trader.run_cycle(symbol=t)
+        except Exception as e:
+            print(f"❌ Error analyzing {t}: {e}\n")
+

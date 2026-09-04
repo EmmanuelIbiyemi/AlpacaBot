@@ -291,15 +291,22 @@ if __name__ == "__main__":
         sys.stderr.flush()
         mcp.run(transport="stdio")
     else:
-        from MVP_AI.ai_use import DeepSeekOptionsTrader
-        ticker = "SPY"
+        from MVP_AI.ai_use import DeepSeekOptionsTrader, DEFAULT_WATCHLIST
+        custom_ticker = None
         for arg in sys.argv[1:]:
             if not arg.startswith("-"):
-                ticker = arg
+                custom_ticker = arg.upper()
                 break
-        print(f"🚀 Launching DeepSeek Options Trading Engine for {ticker.upper()}...")
+
+        tickers = [custom_ticker] if custom_ticker else DEFAULT_WATCHLIST
+        print(f"🚀 Launching DeepSeek Options Trading Engine for {len(tickers)} stock(s): {', '.join(tickers)}...\n")
         trader = DeepSeekOptionsTrader()
-        trader.run_cycle(symbol=ticker)
+        for t in tickers:
+            try:
+                trader.run_cycle(symbol=t)
+            except Exception as e:
+                print(f"❌ Error analyzing {t}: {e}\n")
+
 
 
 
