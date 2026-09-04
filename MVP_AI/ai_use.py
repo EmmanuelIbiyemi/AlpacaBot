@@ -65,18 +65,32 @@ class DeepSeekOptionsTrader:
         recent_hourly_range = float(df['hourly_range'].iloc[-5:].mean())
         high_volatility = bool(recent_hourly_range > (avg_hourly_range * 1.2))
 
+        total_span = highest_high - lowest_low
+        range_pos = round(((recent_close - lowest_low) / total_span * 100), 1) if total_span > 0 else 50.0
+
+        if range_pos >= 80:
+            tech_bias = "TESTING_RESISTANCE_NEAR_HIGHS"
+        elif range_pos <= 20:
+            tech_bias = "TESTING_SUPPORT_NEAR_LOWS"
+        elif 35 <= range_pos <= 65 and not high_volatility:
+            tech_bias = "MID_RANGE_CHOP_NEUTRAL"
+        else:
+            tech_bias = "DIRECTIONAL_MOMENTUM"
+
         return {
             "symbol": symbol,
             "current_spot_price": round(recent_close, 2),
             "recent_high": round(highest_high, 2),
             "recent_low": round(lowest_low, 2),
+            "range_position_pct": range_pos,
+            "technical_setup": tech_bias,
             "avg_hourly_range": round(avg_hourly_range, 2),
             "recent_hourly_range": round(recent_hourly_range, 2),
             "is_high_volatility": high_volatility
         }
 
 
-    def fetch_option_contracts(self, symbol: str, spot_price: float = None, limit_per_type: int = 20) -> list:
+    def fetch_option_contracts(self, symbol: str, spot_price: float = None, limit_per_type: int = 10) -> list:
         """
         Fetches active call and put contracts from Alpaca near current date and spot price.
         Ensures a balanced set of both Calls and Puts so spreads and iron condors can execute.
@@ -94,10 +108,9 @@ class DeepSeekOptionsTrader:
             "limit": limit_per_type
         }
 
-        # Filter strikes around current price (within +/- 10%) so AI gets ATM/NTM contracts
         if spot_price and spot_price > 0:
-            base_params["strike_price_gte"] = str(round(spot_price * 0.90, 2))
-            base_params["strike_price_lte"] = str(round(spot_price * 1.10, 2))
+            base_params["strike_price_gte"] = str(round(spot_price * 0.92, 2))
+            base_params["strike_price_lte"] = str(round(spot_price * 1.08, 2))
 
         # 1. Fetch Calls
         call_params = dict(base_params)
@@ -129,7 +142,7 @@ class DeepSeekOptionsTrader:
         
         quotes_data = {}
         if contract_symbols:
-            quotes_res = get_latest_option_quotes(contract_symbols[:30])
+            quotes_res = get_latest_option_quotes(contract_symbols[:20])
             if quotes_res.get("status") == "success":
                 quotes_data = quotes_res.get("data", {}).get("quotes", {})
 
@@ -150,36 +163,40 @@ class DeepSeekOptionsTrader:
         Sends the market context and option chain to DeepSeek AI to decide which strategy to trade.
         """
         system_prompt = (
-            "You are a Senior Quantitative Options Trader and Risk Manager.\n"
-            "Analyze the stock's price action, range, hourly volatility, and option contracts.\n\n"
-            "MARKET REGIME & STRATEGY RULES:\n"
-            "1. LOW VOLATILITY / RANGE-BOUND CHOP (Price oscillating between Support & Resistance, ranges contracting):\n"
-            "   - Strategy: IRON_CONDOR (Sell OTM Put Spread + Sell OTM Call Spread) or CREDIT SPREAD.\n"
-            "   - Why: Captures theta time decay as price stays inside the range.\n"
-            "   - NOTE: NEVER use Long Straddle in low volatility chop (theta decay will destroy it).\n\n"
-            "2. HIGH VOLATILITY / BREAKOUT (Expanding ranges, breaking past structure):\n"
-            "   - Strategy: LONG_STRADDLE (Buy ATM Call + Buy ATM Put).\n"
-            "   - Why: Anticipates explosive move in either direction.\n"
-            "   - NOTE: NEVER use Iron Condor in high volatility (wings will get blown out).\n\n"
-            "3. SUPPORT BOUNCE / BULLISH ACCUMULATION:\n"
-            "   - Strategy: BULL_CALL_SPREAD (Debit Call Spread) or BULL_PUT_SPREAD (Credit Put Spread).\n\n"
-            "4. RESISTANCE REJECTION / BEARISH DISTRIBUTION:\n"
-            "   - Strategy: BEAR_PUT_SPREAD (Debit Put Spread) or BEAR_CALL_SPREAD (Credit Call Spread).\n\n"
-            "CRITICAL EXECUTION RULES:\n"
-            "- If bid/ask prices in option contracts are null (common in paper trading/off-hours), DO NOT HOLD solely because of null quotes! Estimate a reasonable limit price ($1.00 - $3.00) and execute the trade.\n"
-            "- You have been provided BOTH active Call and Put contracts. Select real contract symbols from available_option_contracts.\n"
-            "- If an actionable pattern exists (e.g. range-bound -> Iron Condor, breakout -> Straddle), set trade_action.execute = true.\n\n"
+            "You are a Senior Quantitative Options Trader.\n"
+            "Analyze technical structure, location in 5-day range (range_position_pct), and volatility to pick the right strategy:\n\n"
+            "MANDATORY STRATEGY RULES:\n"
+            "1. TESTING_RESISTANCE_NEAR_HIGHS (range_position_pct >= 80%):\n"
+            "   - Preferred Strategy: BEAR_PUT_SPREAD (Debit Put Spread) or BEAR_CALL_SPREAD.\n"
+            "   - Why: Overextended near resistance limits. High probability of pullback.\n"
+            "   - FORBIDDEN: DO NOT use Iron Condor near the ceiling (an upward breach causes max loss on call wing).\n\n"
+            "2. TESTING_SUPPORT_NEAR_LOWS (range_position_pct <= 20%):\n"
+            "   - Preferred Strategy: BULL_CALL_SPREAD (Debit Call Spread) or BULL_PUT_SPREAD.\n"
+            "   - Why: Sitting at major support. High probability of bounce.\n"
+            "   - FORBIDDEN: DO NOT use Iron Condor near the floor (a downward breach causes max loss on put wing).\n\n"
+            "3. MID_RANGE_CHOP_NEUTRAL (range_position_pct between 35% and 65% with low volatility):\n"
+            "   - Preferred Strategy: IRON_CONDOR (Sell OTM Put Spread + Sell OTM Call Spread).\n"
+            "   - Why: Price is balanced away from both wings, ideal for theta decay.\n"
+            "   - FORBIDDEN: DO NOT use Long Straddle in chop (theta burn).\n\n"
+            "4. HIGH_VOLATILITY_BREAKOUT (Hourly range expanding rapidly, breakout past 5-day high/low):\n"
+            "   - Preferred Strategy: LONG_STRADDLE (Buy ATM Call + Buy ATM Put).\n"
+            "   - Why: Explosive move expected in either direction.\n\n"
+            "EXECUTION & FORMAT RULES:\n"
+            "- Keep market_summary and reasoning concise (max 2 sentences each). DO NOT output giant text blocks.\n"
+            "- If bid/ask prices are null, estimate reasonable limit prices ($1.00 - $3.00) and execute.\n"
+            "- Select real contract symbols from available_option_contracts.\n"
+            "- Set trade_action.execute = true when an actionable setup is detected.\n\n"
             "Respond ONLY with a valid JSON object matching this schema:\n"
             "{\n"
-            '  "market_regime": "LOW_VOLATILITY_CHOP" | "HIGH_VOLATILITY_BREAKOUT" | "BULLISH_SUPPORT" | "BEARISH_RESISTANCE" | "UNCERTAIN",\n'
-            '  "strategy": "IRON_CONDOR" | "LONG_STRADDLE" | "BULL_CALL_SPREAD" | "BEAR_PUT_SPREAD" | "BULL_PUT_SPREAD" | "HOLD",\n'
+            '  "market_regime": "BEARISH_RESISTANCE" | "BULLISH_SUPPORT" | "MID_RANGE_CHOP" | "VOLATILITY_BREAKOUT",\n'
+            '  "strategy": "BEAR_PUT_SPREAD" | "BULL_CALL_SPREAD" | "BULL_PUT_SPREAD" | "IRON_CONDOR" | "LONG_STRADDLE" | "HOLD",\n'
             '  "confidence": 0.0 to 1.0,\n'
-            '  "strategy_suitability": "Why this strategy is ideal and why competing strategies (e.g. Straddle vs Condor) fail in this regime",\n'
-            '  "market_summary": "1-2 sentence overview of volatility and price action",\n'
-            '  "reasoning": "Detailed technical justification",\n'
+            '  "strategy_suitability": "Why this strategy is ideal and why competing ones fail here",\n'
+            '  "market_summary": "1-2 sentence overview",\n'
+            '  "reasoning": "1-2 sentence technical justification",\n'
             '  "trade_action": {\n'
             '    "execute": true | false,\n'
-            '    "strategy_name": "iron_condor" | "long_straddle" | "bull_call_spread" | "bear_put_spread" | "bull_put_spread",\n'
+            '    "strategy_name": "bear_put_spread" | "bull_call_spread" | "bull_put_spread" | "iron_condor" | "long_straddle",\n'
             '    "parameters": {\n'
             '      "call_symbol": "OCC symbol",\n'
             '      "put_symbol": "OCC symbol",\n'
@@ -207,7 +224,7 @@ class DeepSeekOptionsTrader:
 
         user_content = json.dumps({
             "market_snapshot": market_snapshot,
-            "available_option_contracts": options_candidates[:40],
+            "available_option_contracts": options_candidates[:20],
             "current_portfolio_positions": open_positions
         }, indent=2)
 
@@ -223,7 +240,8 @@ class DeepSeekOptionsTrader:
                 {"role": "user", "content": f"Analyze this market data and make a trade decision:\n{user_content}"}
             ],
             "response_format": {"type": "json_object"},
-            "temperature": 0.2
+            "temperature": 0.2,
+            "max_tokens": 1500
         }
 
         response = requests.post(DEEPSEEK_API_URL, json=payload, headers=headers, timeout=60)
@@ -231,8 +249,27 @@ class DeepSeekOptionsTrader:
             raise RuntimeError(f"DeepSeek API error {response.status_code}: {response.text}")
 
         res_json = response.json()
-        raw_text = res_json["choices"][0]["message"]["content"]
-        return json.loads(raw_text)
+        raw_text = res_json["choices"][0]["message"]["content"].strip()
+
+        # Clean markdown codeblocks if returned
+        if raw_text.startswith("```json"):
+            raw_text = raw_text[7:]
+        elif raw_text.startswith("```"):
+            raw_text = raw_text[3:]
+        if raw_text.endswith("```"):
+            raw_text = raw_text[:-3]
+        raw_text = raw_text.strip()
+
+        import re
+        try:
+            return json.loads(raw_text)
+        except Exception:
+            # Fallback regex search for JSON
+            match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+            if match:
+                return json.loads(match.group(0))
+            raise ValueError(f"Could not parse DeepSeek JSON response: {raw_text[:200]}...")
+
 
 
     def execute_deepseek_trade(self, decision: dict) -> dict:
@@ -336,8 +373,10 @@ class DeepSeekOptionsTrader:
         # 1. Fetch Market Context
         snapshot = self.fetch_market_data(symbol)
         print(f"📈 Spot Price: ${snapshot['current_spot_price']}")
-        print(f"📊 Range: ${snapshot['recent_low']} - ${snapshot['recent_high']}")
+        print(f"📊 Range: ${snapshot['recent_low']} - ${snapshot['recent_high']} (At {snapshot['range_position_pct']}% of range)")
+        print(f"📍 Technical Setup: {snapshot['technical_setup']}")
         print(f"⚡ High Volatility: {snapshot['is_high_volatility']}")
+
 
         # 2. Fetch Options Candidates (filtered around current spot price)
         contracts = self.fetch_option_contracts(symbol, spot_price=snapshot['current_spot_price'])
