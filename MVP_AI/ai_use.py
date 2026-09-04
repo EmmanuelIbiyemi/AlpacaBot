@@ -19,6 +19,9 @@ from funcs.straddles.straddles import (
 )
 from funcs.positions.position import getPositions, closeAPosition
 
+# This importing is for another agent to tell me the execution time and fill price it should do for me 
+from execution_agent import OptionsExecutionAgent
+
 DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
 DATA_BASE_URL = "https://data.alpaca.markets"
 
@@ -351,7 +354,8 @@ class DeepSeekOptionsTrader:
                 put_sell_price=float(params.get("put_sell_price", 1.0)),
                 call_sell_price=float(params.get("call_sell_price", 1.0)),
                 call_buy_price=float(params.get("call_buy_price", 0.5)),
-                qty=qty
+                qty=qty,
+                limit_price=float(params.get("limit_price", 1.0))
             )
 
         else:
@@ -402,7 +406,10 @@ class DeepSeekOptionsTrader:
 
 
         # 5. Execute
+        # This is to add the execution fill type
         execution_result = self.execute_deepseek_trade(decision)
+        execution_filltype_ = OptionsExecutionAgent.calculate_fill_price(decision.get('strategy'), decision.get('params'), snapshot.get('current_spot_price'))
+        print(f" Exeution price : response {execution_filltype_}")
         print(f"\n🚀 Execution Result: {execution_result.get('status')}")
         if execution_result.get("status") == "success":
             print(f"   ✅ Strategy '{decision.get('strategy')}' executed successfully on Alpaca Paper Trading!")
