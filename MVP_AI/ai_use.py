@@ -8,9 +8,7 @@ import pandas as pd
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from urls.urls import ENDPOINT, APIKEY, APISECRET, DEEPSEEK_API_KEY
-from alpaca.data.historical import StockHistoricalDataClient
-from alpaca.data.requests import StockBarsRequest
-from alpaca.data.timeframe import TimeFrame
+from funcs.charts.charts import get_latest_option_quotes, get_option_bars
 
 from funcs.straddles.straddles import (
     long_straddle,
@@ -22,6 +20,7 @@ from funcs.straddles.straddles import (
 from funcs.positions.position import getPositions, closeAPosition
 
 DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
+DATA_BASE_URL = "https://data.alpaca.markets"
 
 class DeepSeekOptionsTrader:
     def __init__(self):
@@ -29,7 +28,6 @@ class DeepSeekOptionsTrader:
             raise ValueError("DEEP_SEEK_API_KEY is not set in your .env file!")
         
         self.api_key = DEEPSEEK_API_KEY
-        self.data_client = StockHistoricalDataClient(APIKEY, APISECRET)
         self.alpaca_headers = {
             "accept": "application/json",
             "APCA-API-KEY-ID": APIKEY,
@@ -38,29 +36,31 @@ class DeepSeekOptionsTrader:
 
     def fetch_market_data(self, symbol: str, lookback_days: int = 5) -> dict:
         """
-        Gathers hourly candle metrics, ranges, and volatility for the symbol.
+        Gathers hourly candle metrics, ranges, and volatility for the symbol using Alpaca REST API.
         """
         symbol = symbol.upper()
-        end_time = datetime.now(timezone.utc)
+        end_time = datetime.now(timezone.utc) - timedelta(minutes=16) 
         start_time = end_time - timedelta(days=lookback_days)
 
-        request_params = StockBarsRequest(
-            symbol_or_symbols=symbol,
-            timeframe=TimeFrame.Hour,
-            start=start_time,
-            end=end_time
-        )
+        start_str = start_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+        end_str = end_time.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        bars = self.data_client.get_stock_bars(request_params)
-        df = bars.df.loc[symbol]
+        url = f"{DATA_BASE_URL}/v2/stocks/{symbol}/bars?timeframe=1Hour&start={start_str}&end={end_str}&limit=100"
+        resp = requests.get(url, headers=self.alpaca_headers)
 
-        if df.empty:
-            raise ValueError(f"No chart data available for {symbol}")
+        if resp.status_code != 200:
+            raise ValueError(f"Failed to fetch market data from Alpaca: {resp.text}")
 
-        recent_close = float(df['close'].iloc[-1])
-        highest_high = float(df['high'].max())
-        lowest_low = float(df['low'].min())
-        df['hourly_range'] = df['high'] - df['low']
+        data = resp.json()
+        bars = data.get("bars", [])
+        if not bars:
+            raise ValueError(f"No chart bars available for {symbol}")
+
+        df = pd.DataFrame(bars)
+        recent_close = float(df['c'].iloc[-1])
+        highest_high = float(df['h'].max())
+        lowest_low = float(df['l'].min())
+        df['hourly_range'] = df['h'] - df['l']
         avg_hourly_range = float(df['hourly_range'].mean())
         recent_hourly_range = float(df['hourly_range'].iloc[-5:].mean())
         high_volatility = bool(recent_hourly_range > (avg_hourly_range * 1.2))
@@ -74,6 +74,7 @@ class DeepSeekOptionsTrader:
             "recent_hourly_range": round(recent_hourly_range, 2),
             "is_high_volatility": high_volatility
         }
+
 
     def fetch_option_contracts(self, symbol: str, limit: int = 30) -> list:
         """
@@ -92,15 +93,26 @@ class DeepSeekOptionsTrader:
             return []
 
         contracts = resp.json().get("option_contracts", [])
+        contract_symbols = [c.get("symbol") for c in contracts if c.get("symbol")]
+        
+        quotes_data = {}
+        if contract_symbols:
+            quotes_res = get_latest_option_quotes(contract_symbols[:20])
+            if quotes_res.get("status") == "success":
+                quotes_data = quotes_res.get("data", {}).get("quotes", {})
+
         return [
             {
                 "symbol": c.get("symbol"),
                 "type": c.get("type"),
                 "strike_price": float(c.get("strike_price")),
-                "expiration_date": c.get("expiration_date")
+                "expiration_date": c.get("expiration_date"),
+                "bid": quotes_data.get(c.get("symbol"), {}).get("bp"),
+                "ask": quotes_data.get(c.get("symbol"), {}).get("ap")
             }
             for c in contracts
         ]
+
 
     def ask_deepseek(self, market_snapshot: dict, options_candidates: list, open_positions: list) -> dict:
         """
