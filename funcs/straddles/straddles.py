@@ -1,118 +1,244 @@
 """
-    So this file is for me to write the function for the 
-    bull call spread, bear put spread, iron condor, or long straddle 
-    so that the erm MCP can call it as it wants you know what i mean
+Strategies engine for option spreads and straddles:
+- Long Straddle (ATM Call + ATM Put)
+- Bull Call Spread (Debit Call Spread)
+- Bear Put Spread (Debit Put Spread)
+- Bull Put Spread (Credit Put Spread)
+- Bear Call Spread (Credit Call Spread)
+- Iron Condor (Bull Put Spread + Bear Call Spread)
 """
 
 from ..positions.orders import placeBuyorderLimit_, placeSellOrderLimit_
 from ..positions.position import closeAPosition
 
 def bull_call_spread(lower_call_symbol: str, higher_call_symbol: str, buy_price: float, sell_price: float, qty: int):
-    # BULL CALL = BUY LOW (Lower Strike), SELL HIGH (Higher Strike)
-    # 1. Buy the lower strike call first (The expensive leg)
+    """
+    Bull Call Spread (Debit Spread):
+    1. Buy the lower strike call (expensive leg)
+    2. Sell the higher strike call (discount leg)
+    """
     leg1_buy = placeBuyorderLimit_(symbol=lower_call_symbol, qty=qty, limit_price=buy_price)
     
-    if leg1_buy["status"] == "success":
-        # 2. Sell the higher strike call to get your discount
-        leg2_sell = placeSellOrderLimit_(symbol=higher_call_symbol, qty=qty, limit_price=sell_price)
-        
-    # Safety Check: If Leg 2 fails to sell, your account is exposed. Panic close Leg 1!
-    if "error" in [leg1_buy.get("status"), leg2_sell.get("status")]:
-        if leg1_buy.get("status") == "success":
-            closeAPosition(symbol=lower_call_symbol, qty=qty, percentage=100)
-        return {"status": "error", "reason": "Spread execution failed. Cleaned up."}
-        
-    return {"status": "success"}
+    if leg1_buy.get("status") != "success":
+        return {
+            "status": "error",
+            "reason": f"Failed to execute Leg 1 (Buy {lower_call_symbol}): {leg1_buy.get('reason')}"
+        }
 
+    leg2_sell = placeSellOrderLimit_(symbol=higher_call_symbol, qty=qty, limit_price=sell_price)
+    
+    # If Leg 2 fails, panic close Leg 1 to prevent directional exposure
+    if leg2_sell.get("status") != "success":
+        closeAPosition(symbol=lower_call_symbol, qty=qty)
+        return {
+            "status": "error",
+            "reason": f"Leg 2 (Sell {higher_call_symbol}) failed: {leg2_sell.get('reason')}. Leg 1 closed for safety."
+        }
+
+    return {
+        "status": "success",
+        "strategy": "Bull Call Spread",
+        "leg1": leg1_buy.get("order"),
+        "leg2": leg2_sell.get("order")
+    }
 
 
 def bear_put_spread(higher_put_symbol: str, lower_put_symbol: str, buy_price: float, sell_price: float, qty: int):
-    # BEAR PUT = BUY HIGH (Higher Strike), SELL LOW (Lower Strike)
-    # 1. Buy the higher strike put first (The expensive leg)
+    """
+    Bear Put Spread (Debit Spread):
+    1. Buy the higher strike put (expensive leg)
+    2. Sell the lower strike put (discount leg)
+    """
     leg1_buy = placeBuyorderLimit_(symbol=higher_put_symbol, qty=qty, limit_price=buy_price)
     
-    if leg1_buy["status"] == "success":
-        # 2. Sell the lower strike put to get your discount
-        leg2_sell = placeSellOrderLimit_(symbol=lower_put_symbol, qty=qty, limit_price=sell_price)
-        
-    # Safety Check: If Leg 2 fails, panic close Leg 1!
-    if "error" in [leg1_buy.get("status"), leg2_sell.get("status")]:
-        if leg1_buy.get("status") == "success":
-            closeAPosition(symbol=higher_put_symbol, qty=qty, percentage=100)
-        return {"status": "error", "reason": "Spread execution failed. Cleaned up."}
-        
-    return {"status": "success"}
-
-
-
-def iron_condor():
-    """
-        This is the combination of both the bull_put and bear_put strategy
-    """
-    try:
-        # Bull put if successfull it should place the bearput
-        bull_put = bull_put_spread()
-        
-        if bull_put["status"] == "success":
-            bear_put = bear_put_spread()
-
+    if leg1_buy.get("status") != "success":
         return {
-            "status":"success",
-            "result":{
-                "bull_put":bull_put,
-                "bear_put":bear_put
-            }
-        }
-            
-    except Exception as error:
-        return {
-            "status":"error",
-            "reason":str(error)
+            "status": "error",
+            "reason": f"Failed to execute Leg 1 (Buy {higher_put_symbol}): {leg1_buy.get('reason')}"
         }
 
-def long_straddle(call_buy_price: int , call_put_price: int, symbol: str, qty: int):
+    leg2_sell = placeSellOrderLimit_(symbol=lower_put_symbol, qty=qty, limit_price=sell_price)
+    
+    if leg2_sell.get("status") != "success":
+        closeAPosition(symbol=higher_put_symbol, qty=qty)
+        return {
+            "status": "error",
+            "reason": f"Leg 2 (Sell {lower_put_symbol}) failed: {leg2_sell.get('reason')}. Leg 1 closed for safety."
+        }
+
+    return {
+        "status": "success",
+        "strategy": "Bear Put Spread",
+        "leg1": leg1_buy.get("order"),
+        "leg2": leg2_sell.get("order")
+    }
+
+
+def bull_put_spread(lower_put_symbol: str, higher_put_symbol: str, buy_price: float, sell_price: float, qty: int):
+    """
+    Bull Put Spread (Credit Spread):
+    1. Buy the lower strike put (protective long put)
+    2. Sell the higher strike put (income short put)
+    """
+    # Buy protection first
+    leg1_buy = placeBuyorderLimit_(symbol=lower_put_symbol, qty=qty, limit_price=buy_price)
+    if leg1_buy.get("status") != "success":
+        return {
+            "status": "error",
+            "reason": f"Failed to execute Leg 1 (Buy {lower_put_symbol}): {leg1_buy.get('reason')}"
+        }
+
+    leg2_sell = placeSellOrderLimit_(symbol=higher_put_symbol, qty=qty, limit_price=sell_price)
+    if leg2_sell.get("status") != "success":
+        closeAPosition(symbol=lower_put_symbol, qty=qty)
+        return {
+            "status": "error",
+            "reason": f"Leg 2 (Sell {higher_put_symbol}) failed: {leg2_sell.get('reason')}. Leg 1 closed for safety."
+        }
+
+    return {
+        "status": "success",
+        "strategy": "Bull Put Spread",
+        "leg1": leg1_buy.get("order"),
+        "leg2": leg2_sell.get("order")
+    }
+
+
+def bear_call_spread(lower_call_symbol: str, higher_call_symbol: str, sell_price: float, buy_price: float, qty: int):
+    """
+    Bear Call Spread (Credit Spread):
+    1. Buy the higher strike call (protective long call)
+    2. Sell the lower strike call (income short call)
+    """
+    leg1_buy = placeBuyorderLimit_(symbol=higher_call_symbol, qty=qty, limit_price=buy_price)
+    if leg1_buy.get("status") != "success":
+        return {
+            "status": "error",
+            "reason": f"Failed to execute Leg 1 (Buy {higher_call_symbol}): {leg1_buy.get('reason')}"
+        }
+
+    leg2_sell = placeSellOrderLimit_(symbol=lower_call_symbol, qty=qty, limit_price=sell_price)
+    if leg2_sell.get("status") != "success":
+        closeAPosition(symbol=higher_call_symbol, qty=qty)
+        return {
+            "status": "error",
+            "reason": f"Leg 2 (Sell {lower_call_symbol}) failed: {leg2_sell.get('reason')}. Leg 1 closed for safety."
+        }
+
+    return {
+        "status": "success",
+        "strategy": "Bear Call Spread",
+        "leg1": leg1_buy.get("order"),
+        "leg2": leg2_sell.get("order")
+    }
+
+
+def long_straddle(call_symbol: str, put_symbol: str, call_buy_price: float, put_buy_price: float, qty: int):
+    """
+    Long Straddle (Volatility Play):
+    Buys both an At-The-Money (ATM) Call and an At-The-Money (ATM) Put.
+    """
     try:
-         
-        #  This is the first_leg buying the call
+        # 1. Buy the Call leg
         call_buy = placeBuyorderLimit_(
-            symbol=symbol,
+            symbol=call_symbol,
             qty=qty,
             limit_price=call_buy_price
         )
 
-        # 2. Only fire the Put leg if the Call leg successfully filled
-        if call_buy.get("status") == "success":
-            put_buy = placeBuyorderLimit_(
-                symbol=symbol,
-                qty=qty,
-                limit_price=call_put_price
-            )
-
-
-        if (not call_buy or call_buy.get("status") == "error" or 
-            not put_buy or put_buy.get("status") == "error"):
-            """
-                The plan will be just to close the position quickly since one position is missing i mean fill it up later will just be filled at a bad price
-            """
-
-            closeAPosition(
-                symbol=symbol , 
-                qty=qty , 
-                percentage=100
-            )
-
+        if call_buy.get("status") != "success":
             return {
                 "status": "error",
-                "reaosn":"One order was just placed for the long straddle"
+                "reason": f"Failed to buy Call leg ({call_symbol}): {call_buy.get('reason')}"
             }
-        
+
+        # 2. Buy the Put leg
+        put_buy = placeBuyorderLimit_(
+            symbol=put_symbol,
+            qty=qty,
+            limit_price=put_buy_price
+        )
+
+        # Safety Check: If Put fails, liquidate Call immediately
+        if put_buy.get("status") != "success":
+            closeAPosition(symbol=call_symbol, qty=qty)
+            return {
+                "status": "error",
+                "reason": f"Put leg ({put_symbol}) failed: {put_buy.get('reason')}. Call leg closed for safety."
+            }
+
         return {
-            "status":"success",
-            "reason":"Long straddle placed successfully"
+            "status": "success",
+            "strategy": "Long Straddle",
+            "call_leg": call_buy.get("order"),
+            "put_leg": put_buy.get("order")
         }
 
     except Exception as error:
         return {
-            "status":"error",
-            "reason":str(error)
+            "status": "error",
+            "reason": str(error)
         }
+
+
+def iron_condor(
+    put_buy_symbol: str,
+    put_sell_symbol: str,
+    call_sell_symbol: str,
+    call_buy_symbol: str,
+    put_buy_price: float,
+    put_sell_price: float,
+    call_sell_price: float,
+    call_buy_price: float,
+    qty: int
+):
+    """
+    Iron Condor: Combination of Bull Put Spread and Bear Call Spread.
+    """
+    try:
+        # Leg 1 & 2: Bull Put Spread (Wing below market)
+        put_spread = bull_put_spread(
+            lower_put_symbol=put_buy_symbol,
+            higher_put_symbol=put_sell_symbol,
+            buy_price=put_buy_price,
+            sell_price=put_sell_price,
+            qty=qty
+        )
+
+        if put_spread.get("status") != "success":
+            return {
+                "status": "error",
+                "reason": f"Iron Condor Put wing failed: {put_spread.get('reason')}"
+            }
+
+        # Leg 3 & 4: Bear Call Spread (Wing above market)
+        call_spread = bear_call_spread(
+            lower_call_symbol=call_sell_symbol,
+            higher_call_symbol=call_buy_symbol,
+            sell_price=call_sell_price,
+            buy_price=call_buy_price,
+            qty=qty
+        )
+
+        if call_spread.get("status") != "success":
+            # Clean up put spread wings
+            closeAPosition(symbol=put_buy_symbol, qty=qty)
+            closeAPosition(symbol=put_sell_symbol, qty=qty)
+            return {
+                "status": "error",
+                "reason": f"Iron Condor Call wing failed: {call_spread.get('reason')}. Put wing rolled back."
+            }
+
+        return {
+            "status": "success",
+            "strategy": "Iron Condor",
+            "put_spread": put_spread,
+            "call_spread": call_spread
+        }
+
+    except Exception as error:
+        return {
+            "status": "error",
+            "reason": str(error)
+        }
+

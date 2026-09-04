@@ -1,138 +1,68 @@
 import os
 import sys
+import requests
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from urls.urls import ENDPOINT, APIKEY, APISECRET
 
-import requests
+def _get_headers():
+    return {
+        "accept": "application/json",
+        "content-type": "application/json",
+        "APCA-API-KEY-ID": APIKEY,
+        "APCA-API-SECRET-KEY": APISECRET
+    }
 
-def placeBuyorderLimit_(symbol: str, qty: str, limit_price: str):
+def place_order(symbol: str, qty: int | str, side: str, order_type: str = "limit", limit_price: float | str = None, stop_price: float | str = None, time_in_force: str = "day"):
+    """
+    Submits an equity or option order to Alpaca and returns detailed order info or error.
+    """
     try:
-        url = ENDPOINT + "/orders"
+        url = f"{ENDPOINT}/orders"
         payload = {
-            "limit_price": limit_price,
-            "qty": qty,
-            "side": "buy",
-            "symbol": symbol,
-            "time_in_force": "gtc",
-            "type": "limit"
-        }
-        headers = {
-            "accept": "application/json",
-            "content-type": "application/json",
-            "APCA-API-KEY-ID": APIKEY,
-            "APCA-API-SECRET-KEY": APISECRET
+            "symbol": symbol.upper(),
+            "qty": str(qty),
+            "side": side.lower(),
+            "type": order_type.lower(),
+            "time_in_force": time_in_force
         }
 
-        response = requests.post(url, json=payload, headers=headers)
+        if limit_price is not None:
+            payload["limit_price"] = str(limit_price)
+        if stop_price is not None:
+            payload["stop_price"] = str(stop_price)
 
-        return {
-            "status":"success",
-            "msg":"order placed successfully"
-        }
+        response = requests.post(url, json=payload, headers=_get_headers())
 
+        if response.status_code in (200, 201):
+            return {
+                "status": "success",
+                "msg": f"{side.upper()} order placed successfully",
+                "order": response.json()
+            }
+        else:
+            return {
+                "status": "error",
+                "code": response.status_code,
+                "reason": response.text
+            }
     except Exception as error:
         return {
-            "status":"error",
-            "reason":str(error)
+            "status": "error",
+            "reason": str(error)
         }
 
-def placeSellOrderLimit_(symbol: str, qty: str, limit_price: str):
-    try:
-        url = ENDPOINT
+def placeBuyorderLimit_(symbol: str, qty: int | str, limit_price: float | str):
+    return place_order(symbol=symbol, qty=qty, side="buy", order_type="limit", limit_price=limit_price)
 
-        payload = {
-            "limit_price": limit_price,
-            "qty": qty,
-            "side": "sell",
-            "symbol": symbol,
-            "time_in_force": "gtc",
-            "type": "limit"
-        }
-        headers = {
-            "accept": "application/json",
-            "content-type": "application/json",
-            "APCA-API-KEY-ID": APIKEY,
-            "APCA-API-SECRET-KEY": APISECRET
-        }
+def placeSellOrderLimit_(symbol: str, qty: int | str, limit_price: float | str):
+    return place_order(symbol=symbol, qty=qty, side="sell", order_type="limit", limit_price=limit_price)
 
-        response = requests.post(url, json=payload, headers=headers)
+def placeBuyorder_Stop(symbol: str, qty: int | str, stop_price: float | str):
+    return place_order(symbol=symbol, qty=qty, side="buy", order_type="stop", stop_price=stop_price)
 
-        return {
-            "status":"success",
-            "msg":"order placed successfully"
-        }
+def placeSellorderStop(symbol: str, qty: int | str, stop_price: float | str):
+    return place_order(symbol=symbol, qty=qty, side="sell", order_type="stop", stop_price=stop_price)
 
-    except Exception as error:
-        return {
-            "status":"error",
-            "reason":str(error)
-        }
-
-
-def placeBuyorder_Stop(symbol: str, qty: int, stop_price: str):
-    try:
-        url = ENDPOINT
-
-        payload = {
-            "stop_price": stop_price,
-            "qty": qty,
-            "side": "buy",
-            "symbol": symbol,
-            "time_in_force": "gtc",
-            "type": "stop"
-        }
-        headers = {
-            "accept": "application/json",
-            "content-type": "application/json",
-            "APCA-API-KEY-ID": APIKEY,
-            "APCA-API-SECRET-KEY": APISECRET
-        }
-
-        response = requests.post(url, json=payload, headers=headers)
-
-        return {
-            "status":"success",
-            "msg":"order placed successfully"
-        }
-
-    except Exception as error:
-        return {
-            "status":"error",
-            "reason":str(error)
-        }
-
-
-def placeSellorderStop(symbol: str, qty: str, stop_price: str):
-    try:
-        url = ENDPOINT
-
-        payload = {
-            "stop_price": stop_price,
-            "qty": qty,
-            "side": "sell",
-            "symbol": symbol,
-            "time_in_force": "gtc",
-            "type": "stop"
-        }
-        headers = {
-            "accept": "application/json",
-            "content-type": "application/json",
-            "APCA-API-KEY-ID": APIKEY,
-            "APCA-API-SECRET-KEY": APISECRET
-        }
-
-        response = requests.post(url, json=payload, headers=headers)
-
-        return {
-            "status":"success",
-            "msg":"order placed successfully"
-        }
-
-    except Exception as error:
-        return {
-            "status":"error",
-            "reason":str(error)
-        }
 

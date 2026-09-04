@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "alpaca-options-desk": {
+      "command": "C:\\Users\\USER\\OneDrive\\Desktop\\AlpacaBot\\Bot\\a_bot\\Scripts\\python.exe",
+      "args": [
+        "C:\\Users\\USER\\OneDrive\\Desktop\\AlpacaBot\\Bot\\main.py"
+      ],
+      "env": {
+        "PYTHONPATH": "C:\\Users\\USER\\OneDrive\\Desktop\\AlpacaBot\\Bot"
+      }
+    }
+  }
+}
+
