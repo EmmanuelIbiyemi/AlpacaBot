@@ -65,4 +65,50 @@ def placeBuyorder_Stop(symbol: str, qty: int | str, stop_price: float | str):
 def placeSellorderStop(symbol: str, qty: int | str, stop_price: float | str):
     return place_order(symbol=symbol, qty=qty, side="sell", order_type="stop", stop_price=stop_price)
 
+def place_mleg_order(legs: list, qty: int | str = 1, limit_price: float | str = None, order_type: str = "limit", time_in_force: str = "day"):
+    """
+    Submits an atomic Multi-Leg (MLeg) order to Alpaca.
+    Bypasses naked short margin errors by bundling all legs simultaneously.
+    legs: [{"symbol": "...", "ratio_qty": "1", "side": "buy"|"sell"}, ...]
+    """
+    try:
+        url = f"{ENDPOINT}/orders"
+        formatted_legs = []
+        for leg in legs:
+            formatted_legs.append({
+                "symbol": leg["symbol"].upper(),
+                "ratio_qty": str(leg.get("ratio_qty", 1)),
+                "side": leg["side"].lower()
+            })
+
+        payload = {
+            "order_class": "mleg",
+            "qty": str(qty),
+            "type": order_type.lower(),
+            "time_in_force": time_in_force,
+            "legs": formatted_legs
+        }
+        if limit_price is not None:
+            payload["limit_price"] = str(limit_price)
+
+        response = requests.post(url, json=payload, headers=_get_headers())
+        if response.status_code in (200, 201):
+            return {
+                "status": "success",
+                "msg": "Multi-leg (MLeg) order placed successfully",
+                "order": response.json()
+            }
+        else:
+            return {
+                "status": "error",
+                "code": response.status_code,
+                "reason": response.text
+            }
+    except Exception as error:
+        return {
+            "status": "error",
+            "reason": str(error)
+        }
+
+
 

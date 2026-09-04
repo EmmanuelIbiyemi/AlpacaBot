@@ -1,184 +1,87 @@
 """
-Strategies engine for option spreads and straddles:
-- Long Straddle (ATM Call + ATM Put)
-- Bull Call Spread (Debit Call Spread)
-- Bear Put Spread (Debit Put Spread)
-- Bull Put Spread (Credit Put Spread)
-- Bear Call Spread (Credit Call Spread)
-- Iron Condor (Bull Put Spread + Bear Call Spread)
+Strategies engine for option spreads and straddles using Alpaca's Multi-Leg (MLeg) API:
+- Iron Condor (4 legs bundled in a single atomic order)
+- Bull Call Spread (2 legs bundled)
+- Bear Put Spread (2 legs bundled)
+- Bull Put Spread (2 legs bundled)
+- Bear Call Spread (2 legs bundled)
+- Long Straddle (2 legs bundled)
 """
 
-from ..positions.orders import placeBuyorderLimit_, placeSellOrderLimit_
+from ..positions.orders import placeBuyorderLimit_, placeSellOrderLimit_, place_mleg_order
 from ..positions.position import closeAPosition
 
 def bull_call_spread(lower_call_symbol: str, higher_call_symbol: str, buy_price: float, sell_price: float, qty: int):
     """
-    Bull Call Spread (Debit Spread):
-    1. Buy the lower strike call (expensive leg)
-    2. Sell the higher strike call (discount leg)
+    Bull Call Spread: Bundled as a 2-leg atomic MLeg order.
+    1. Buy Lower Call (expensive)
+    2. Sell Higher Call (discount)
     """
-    leg1_buy = placeBuyorderLimit_(symbol=lower_call_symbol, qty=qty, limit_price=buy_price)
-    
-    if leg1_buy.get("status") != "success":
-        return {
-            "status": "error",
-            "reason": f"Failed to execute Leg 1 (Buy {lower_call_symbol}): {leg1_buy.get('reason')}"
-        }
-
-    leg2_sell = placeSellOrderLimit_(symbol=higher_call_symbol, qty=qty, limit_price=sell_price)
-    
-    # If Leg 2 fails, panic close Leg 1 to prevent directional exposure
-    if leg2_sell.get("status") != "success":
-        closeAPosition(symbol=lower_call_symbol, qty=qty)
-        return {
-            "status": "error",
-            "reason": f"Leg 2 (Sell {higher_call_symbol}) failed: {leg2_sell.get('reason')}. Leg 1 closed for safety."
-        }
-
-    return {
-        "status": "success",
-        "strategy": "Bull Call Spread",
-        "leg1": leg1_buy.get("order"),
-        "leg2": leg2_sell.get("order")
-    }
+    legs = [
+        {"symbol": lower_call_symbol, "side": "buy", "ratio_qty": "1"},
+        {"symbol": higher_call_symbol, "side": "sell", "ratio_qty": "1"}
+    ]
+    net_debit = round(max(buy_price - sell_price, 0.05), 2)
+    print(f"📦 Submitting Bull Call Spread MLeg: Buy {lower_call_symbol} / Sell {higher_call_symbol} | Net: ${net_debit}")
+    return place_mleg_order(legs=legs, qty=qty, limit_price=net_debit, order_type="limit")
 
 
 def bear_put_spread(higher_put_symbol: str, lower_put_symbol: str, buy_price: float, sell_price: float, qty: int):
     """
-    Bear Put Spread (Debit Spread):
-    1. Buy the higher strike put (expensive leg)
-    2. Sell the lower strike put (discount leg)
+    Bear Put Spread: Bundled as a 2-leg atomic MLeg order.
+    1. Buy Higher Put (expensive)
+    2. Sell Lower Put (discount)
     """
-    leg1_buy = placeBuyorderLimit_(symbol=higher_put_symbol, qty=qty, limit_price=buy_price)
-    
-    if leg1_buy.get("status") != "success":
-        return {
-            "status": "error",
-            "reason": f"Failed to execute Leg 1 (Buy {higher_put_symbol}): {leg1_buy.get('reason')}"
-        }
-
-    leg2_sell = placeSellOrderLimit_(symbol=lower_put_symbol, qty=qty, limit_price=sell_price)
-    
-    if leg2_sell.get("status") != "success":
-        closeAPosition(symbol=higher_put_symbol, qty=qty)
-        return {
-            "status": "error",
-            "reason": f"Leg 2 (Sell {lower_put_symbol}) failed: {leg2_sell.get('reason')}. Leg 1 closed for safety."
-        }
-
-    return {
-        "status": "success",
-        "strategy": "Bear Put Spread",
-        "leg1": leg1_buy.get("order"),
-        "leg2": leg2_sell.get("order")
-    }
+    legs = [
+        {"symbol": higher_put_symbol, "side": "buy", "ratio_qty": "1"},
+        {"symbol": lower_put_symbol, "side": "sell", "ratio_qty": "1"}
+    ]
+    net_debit = round(max(buy_price - sell_price, 0.05), 2)
+    print(f"📦 Submitting Bear Put Spread MLeg: Buy {higher_put_symbol} / Sell {lower_put_symbol} | Net: ${net_debit}")
+    return place_mleg_order(legs=legs, qty=qty, limit_price=net_debit, order_type="limit")
 
 
 def bull_put_spread(lower_put_symbol: str, higher_put_symbol: str, buy_price: float, sell_price: float, qty: int):
     """
-    Bull Put Spread (Credit Spread):
-    1. Buy the lower strike put (protective long put)
-    2. Sell the higher strike put (income short put)
+    Bull Put Spread (Credit Spread): Bundled as a 2-leg atomic MLeg order.
+    1. Buy Lower Put (protection)
+    2. Sell Higher Put (income)
     """
-    # Buy protection first
-    leg1_buy = placeBuyorderLimit_(symbol=lower_put_symbol, qty=qty, limit_price=buy_price)
-    if leg1_buy.get("status") != "success":
-        return {
-            "status": "error",
-            "reason": f"Failed to execute Leg 1 (Buy {lower_put_symbol}): {leg1_buy.get('reason')}"
-        }
-
-    leg2_sell = placeSellOrderLimit_(symbol=higher_put_symbol, qty=qty, limit_price=sell_price)
-    if leg2_sell.get("status") != "success":
-        closeAPosition(symbol=lower_put_symbol, qty=qty)
-        return {
-            "status": "error",
-            "reason": f"Leg 2 (Sell {higher_put_symbol}) failed: {leg2_sell.get('reason')}. Leg 1 closed for safety."
-        }
-
-    return {
-        "status": "success",
-        "strategy": "Bull Put Spread",
-        "leg1": leg1_buy.get("order"),
-        "leg2": leg2_sell.get("order")
-    }
+    legs = [
+        {"symbol": lower_put_symbol, "side": "buy", "ratio_qty": "1"},
+        {"symbol": higher_put_symbol, "side": "sell", "ratio_qty": "1"}
+    ]
+    net_credit = round(max(sell_price - buy_price, 0.05), 2)
+    print(f"📦 Submitting Bull Put Spread MLeg: Buy {lower_put_symbol} / Sell {higher_put_symbol} | Net: ${net_credit}")
+    return place_mleg_order(legs=legs, qty=qty, limit_price=net_credit, order_type="limit")
 
 
 def bear_call_spread(lower_call_symbol: str, higher_call_symbol: str, sell_price: float, buy_price: float, qty: int):
     """
-    Bear Call Spread (Credit Spread):
-    1. Buy the higher strike call (protective long call)
-    2. Sell the lower strike call (income short call)
+    Bear Call Spread (Credit Spread): Bundled as a 2-leg atomic MLeg order.
+    1. Sell Lower Call (income)
+    2. Buy Higher Call (protection)
     """
-    leg1_buy = placeBuyorderLimit_(symbol=higher_call_symbol, qty=qty, limit_price=buy_price)
-    if leg1_buy.get("status") != "success":
-        return {
-            "status": "error",
-            "reason": f"Failed to execute Leg 1 (Buy {higher_call_symbol}): {leg1_buy.get('reason')}"
-        }
-
-    leg2_sell = placeSellOrderLimit_(symbol=lower_call_symbol, qty=qty, limit_price=sell_price)
-    if leg2_sell.get("status") != "success":
-        closeAPosition(symbol=higher_call_symbol, qty=qty)
-        return {
-            "status": "error",
-            "reason": f"Leg 2 (Sell {lower_call_symbol}) failed: {leg2_sell.get('reason')}. Leg 1 closed for safety."
-        }
-
-    return {
-        "status": "success",
-        "strategy": "Bear Call Spread",
-        "leg1": leg1_buy.get("order"),
-        "leg2": leg2_sell.get("order")
-    }
+    legs = [
+        {"symbol": higher_call_symbol, "side": "buy", "ratio_qty": "1"},
+        {"symbol": lower_call_symbol, "side": "sell", "ratio_qty": "1"}
+    ]
+    net_credit = round(max(sell_price - buy_price, 0.05), 2)
+    print(f"📦 Submitting Bear Call Spread MLeg: Buy {higher_call_symbol} / Sell {lower_call_symbol} | Net: ${net_credit}")
+    return place_mleg_order(legs=legs, qty=qty, limit_price=net_credit, order_type="limit")
 
 
 def long_straddle(call_symbol: str, put_symbol: str, call_buy_price: float, put_buy_price: float, qty: int):
     """
-    Long Straddle (Volatility Play):
-    Buys both an At-The-Money (ATM) Call and an At-The-Money (ATM) Put.
+    Long Straddle: Bundled as a 2-leg atomic MLeg order (ATM Call + ATM Put).
     """
-    try:
-        # 1. Buy the Call leg
-        call_buy = placeBuyorderLimit_(
-            symbol=call_symbol,
-            qty=qty,
-            limit_price=call_buy_price
-        )
-
-        if call_buy.get("status") != "success":
-            return {
-                "status": "error",
-                "reason": f"Failed to buy Call leg ({call_symbol}): {call_buy.get('reason')}"
-            }
-
-        # 2. Buy the Put leg
-        put_buy = placeBuyorderLimit_(
-            symbol=put_symbol,
-            qty=qty,
-            limit_price=put_buy_price
-        )
-
-        # Safety Check: If Put fails, liquidate Call immediately
-        if put_buy.get("status") != "success":
-            closeAPosition(symbol=call_symbol, qty=qty)
-            return {
-                "status": "error",
-                "reason": f"Put leg ({put_symbol}) failed: {put_buy.get('reason')}. Call leg closed for safety."
-            }
-
-        return {
-            "status": "success",
-            "strategy": "Long Straddle",
-            "call_leg": call_buy.get("order"),
-            "put_leg": put_buy.get("order")
-        }
-
-    except Exception as error:
-        return {
-            "status": "error",
-            "reason": str(error)
-        }
+    legs = [
+        {"symbol": call_symbol, "side": "buy", "ratio_qty": "1"},
+        {"symbol": put_symbol, "side": "buy", "ratio_qty": "1"}
+    ]
+    total_debit = round(call_buy_price + put_buy_price, 2)
+    print(f"📦 Submitting Long Straddle MLeg: Buy {call_symbol} & Buy {put_symbol} | Net: ${total_debit}")
+    return place_mleg_order(legs=legs, qty=qty, limit_price=total_debit, order_type="limit")
 
 
 def iron_condor(
@@ -186,59 +89,66 @@ def iron_condor(
     put_sell_symbol: str,
     call_sell_symbol: str,
     call_buy_symbol: str,
-    put_buy_price: float,
-    put_sell_price: float,
-    call_sell_price: float,
-    call_buy_price: float,
-    qty: int
+    put_buy_price: float = 0.5,
+    put_sell_price: float = 1.0,
+    call_sell_price: float = 1.0,
+    call_buy_price: float = 0.5,
+    qty: int = 1,
+    limit_price: float = None
 ):
     """
-    Iron Condor: Combination of Bull Put Spread and Bear Call Spread.
+    Iron Condor: Bundles all 4 contracts together into a SINGLE atomic Multi-Leg (MLeg) order.
+    Bypasses naked short margin rejection because Alpaca sees long contracts protecting short contracts.
+    
+    Leg 1 (Long Put):  BUY lower strike put (protection)
+    Leg 2 (Short Put): SELL higher strike put (income)
+    Leg 3 (Short Call): SELL lower strike call (income)
+    Leg 4 (Long Call): BUY higher strike call (protection)
     """
     try:
-        # Leg 1 & 2: Bull Put Spread (Wing below market)
-        put_spread = bull_put_spread(
-            lower_put_symbol=put_buy_symbol,
-            higher_put_symbol=put_sell_symbol,
-            buy_price=put_buy_price,
-            sell_price=put_sell_price,
-            qty=qty
-        )
+        legs = [
+            {"symbol": put_buy_symbol, "side": "buy", "ratio_qty": "1"},
+            {"symbol": put_sell_symbol, "side": "sell", "ratio_qty": "1"},
+            {"symbol": call_sell_symbol, "side": "sell", "ratio_qty": "1"},
+            {"symbol": call_buy_symbol, "side": "buy", "ratio_qty": "1"}
+        ]
 
-        if put_spread.get("status") != "success":
+        # Calculate estimated net credit if not explicitly given
+        if limit_price is None:
+            net_credit = (put_sell_price + call_sell_price) - (put_buy_price + call_buy_price)
+            limit_price = round(max(net_credit, 0.10), 2)
+
+        print(f"\n📦 Submitting Single Atomic 4-Leg Iron Condor (MLeg) to Alpaca:")
+        print(f"   • Leg 1 (Long Put):   BUY  {put_buy_symbol}")
+        print(f"   • Leg 2 (Short Put):  SELL {put_sell_symbol}")
+        print(f"   • Leg 3 (Short Call): SELL {call_sell_symbol}")
+        print(f"   • Leg 4 (Long Call):  BUY  {call_buy_symbol}")
+        print(f"   • Net Limit Price: ${limit_price} | Qty: {qty}")
+
+        # Try limit MLeg first
+        res = place_mleg_order(legs=legs, qty=qty, limit_price=limit_price, order_type="limit")
+        if res.get("status") == "success":
             return {
-                "status": "error",
-                "reason": f"Iron Condor Put wing failed: {put_spread.get('reason')}"
+                "status": "success",
+                "strategy": "Iron Condor",
+                "mleg_order": res.get("order")
             }
-
-        # Leg 3 & 4: Bear Call Spread (Wing above market)
-        call_spread = bear_call_spread(
-            lower_call_symbol=call_sell_symbol,
-            higher_call_symbol=call_buy_symbol,
-            sell_price=call_sell_price,
-            buy_price=call_buy_price,
-            qty=qty
-        )
-
-        if call_spread.get("status") != "success":
-            # Clean up put spread wings
-            closeAPosition(symbol=put_buy_symbol, qty=qty)
-            closeAPosition(symbol=put_sell_symbol, qty=qty)
-            return {
-                "status": "error",
-                "reason": f"Iron Condor Call wing failed: {call_spread.get('reason')}. Put wing rolled back."
-            }
-
-        return {
-            "status": "success",
-            "strategy": "Iron Condor",
-            "put_spread": put_spread,
-            "call_spread": call_spread
-        }
+        else:
+            # If limit is rejected due to pricing requirements, try market MLeg
+            print(f"⚠️ Limit MLeg response: {res.get('reason')}. Trying Market MLeg...")
+            mkt_res = place_mleg_order(legs=legs, qty=qty, order_type="market")
+            if mkt_res.get("status") == "success":
+                return {
+                    "status": "success",
+                    "strategy": "Iron Condor",
+                    "mleg_order": mkt_res.get("order")
+                }
+            return res
 
     except Exception as error:
         return {
             "status": "error",
             "reason": str(error)
         }
+
 
